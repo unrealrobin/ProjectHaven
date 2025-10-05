@@ -7,6 +7,7 @@
 
 #include "PHPlayerController.generated.h"
 
+class APHPlayerCharacter;
 struct FInputActionValue;
 class UInputAction;
 class UInputMappingContext;
@@ -35,7 +36,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enhanced Input")
 	UInputMappingContext* StandardInputMappingContext;
 
+	virtual void BeginPlay() override;
+
 private:
+	UPROPERTY(VisibleAnywhere, Category = "Player Character")
+	TObjectPtr<APHPlayerCharacter> OwnedPlayerCharacter = nullptr;
+	
 	/* Subsystem that Stores our Input Mapping Contexts*/
 	UPROPERTY()
 	TObjectPtr<UEnhancedInputLocalPlayerSubsystem> InputSubsystem;
@@ -43,17 +49,15 @@ private:
 	void SetupInputComponent() override;
 	void InitializeEnhancedInput();
 	
-
 	/* Input Delegates that get fired when an Input Triggers*/
 	void HandleAdjustZoomAction(const FInputActionValue& ActionValue);
 	void HandleStandardAction(const FInputActionValue& ActionValue);
 	void HandleMoveAction(const FInputActionValue& ActionValue);
 	void HandleMoveActionComplete(const FInputActionValue& InputActionValue);
 
-	/* Zoom Data*/
-	float PreviousPinchValue = 1.0f;
-	float ZoomSensitivity = 0.2f;
-
 	/*Move Data*/
-	FVector2D LastMoveDelta = FVector2D::ZeroVector;
+	FVector2D PrevScreenTouchPos = FVector2D::ZeroVector;
+	FVector PrevWorldTouchPos = FVector::ZeroVector;
+	
+	FVector GetWorldPosFromScreenPos(FVector2D ScreenPos);
 };

@@ -8,6 +8,14 @@
 #include "Characters/PHPlayerCharacter.h"
 
 
+void APHPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+	bShowMouseCursor = true;
+
+	OwnedPlayerCharacter = Cast<APHPlayerCharacter>(GetPawn());
+}
+
 void APHPlayerController::InitializeEnhancedInput()
 {
 	InputSubsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
@@ -20,62 +28,6 @@ void APHPlayerController::InitializeEnhancedInput()
 		InputSubsystem->AddMappingContext(StandardInputMappingContext, 0);
 	}
 	
-}
-
-void APHPlayerController::HandleAdjustZoomAction(const FInputActionValue& ActionValue)
-{
-	//Extends or shortens the Owning Player Actors Camera Spring Arm.
-	//TODO::Needs work to make much smoother.
-	TWeakObjectPtr PlayerCharacter = Cast<APHPlayerCharacter>(GetPawn());
-	if (PlayerCharacter.IsValid() && PlayerCharacter->CameraComponent)
-	{
-		//Use Values to Adjust Zoom. Clamp as required.
-		float PinchScaleValue = FMath::Clamp(ActionValue.Get<float>(), 0.5f, 3.0f);
-		float PinchDelta = PinchScaleValue / PreviousPinchValue;
-		if (PinchDelta > 0.2f )
-		{
-			float CurrentCameraFOV = PlayerCharacter->CameraComponent->FieldOfView; 
-			PlayerCharacter->CameraComponent->FieldOfView = FMath::Clamp(CurrentCameraFOV * PinchDelta, 60.0f, 160.0f);
-			
-			PreviousPinchValue = PinchScaleValue;
-			UE_LOG(LogTemp, Warning, TEXT("Camera Field Of View: %f, Pinch Value: %f. Pinch Delta: %f"), PlayerCharacter->CameraComponent->FieldOfView, PinchScaleValue, PinchDelta);
-		}
-	}
-}
-
-void APHPlayerController::HandleMoveAction(const FInputActionValue& ActionValue)
-{
-	//Moves the Character on a plane. No Vertical movement.
-	if (LastMoveDelta == FVector2D::ZeroVector)
-	{
-		LastMoveDelta = ActionValue.Get<FVector2D>();
-	}
-	else
-	{
-		TWeakObjectPtr PlayerCharacter = Cast<APHPlayerCharacter>(GetPawn());
-		if (PlayerCharacter.IsValid())
-		{
-			FVector ActorLocation = PlayerCharacter->GetActorLocation();
-			FVector2D LocationOffset = ActionValue.Get<FVector2D>();
-			FVector NewActorLocation = FVector(ActorLocation.X + LocationOffset.X, ActorLocation.Y + LocationOffset.Y, ActorLocation.Z);
-			PlayerCharacter->SetActorLocation(NewActorLocation);
-		}
-		LastMoveDelta = ActionValue.Get<FVector2D>() - LastMoveDelta;
-	}
-
-	//Swipe up, right, left, down moves camera actor up, right, left, down
-}
-
-void APHPlayerController::HandleMoveActionComplete(const FInputActionValue& InputActionValue)
-{
-}
-
-void APHPlayerController::HandleStandardAction(const FInputActionValue& ActionValue)
-{
-	//Handles Most of the Actions in Games
-	//Dependent on what is clicked.
-
-	//Single Touch Tap
 }
 
 void APHPlayerController::SetupInputComponent()
@@ -96,5 +48,90 @@ void APHPlayerController::SetupInputComponent()
 	}
 }
 
+void APHPlayerController::HandleAdjustZoomAction(const FInputActionValue& ActionValue)
+{
+	const float PinchScale = ActionValue.Get<float>(); // >1 = fingers apart, <1 = together
+	if (!IsValid(OwnedPlayerCharacter)) return;
+
+	UCameraComponent* Camera = OwnedPlayerCharacter->CameraComponent;
+	if (!Camera) return;
+
+	float CurrentFOV = Camera->FieldOfView;
+
+	// Lower sensitivity = slower zoom (try 0.05f–0.15f for touch)
+	constexpr float ZoomSensitivity = 0.08f;
+
+	// Apply zoom more gently
+	const float AdjustedScale = 1.0f + (PinchScale - 1.0f) * ZoomSensitivity;
+	float NewFOV = CurrentFOV / AdjustedScale;
+
+	// Clamp to safe range
+	NewFOV = FMath::Clamp(NewFOV, 60.f, 170.f);
+
+	Camera->SetFieldOfView(NewFOV);
+}
+
+void APHPlayerController::HandleStandardAction(const FInputActionValue& ActionValue)
+{
+	//Handles Most of the Actions in Games
+	//Dependent on what is clicked.
+
+	//Single Touch Tap
+}
+
+void APHPlayerController::HandleMoveAction(const FInputActionValue& ActionValue)
+{
+	const FVector2D CurrScreenTouchPos = ActionValue.Get<FVector2D>();
+
+	// First frame setup
+	if (PrevScreenTouchPos == FVector2D::ZeroVector)
+	{
+		PrevScreenTouchPos = CurrScreenTouchPos;
+		return;
+	}
+
+	// Screen delta (in pixels)
+	const FVector2D ScreenDelta = CurrScreenTouchPos - PrevScreenTouchPos;
+	PrevScreenTouchPos = CurrScreenTouchPos;
+
+	if (ScreenDelta.IsNearlyZero()) return;
+
+	if (!IsValid(OwnedPlayerCharacter) || !PlayerCameraManager) return;
+
+	// Get camera rotation (we only need Yaw)
+	const float Yaw = PlayerCameraManager->GetCameraRotation().Yaw;
+
+	// Build horizontal movement axes from yaw
+	const FVector Forward = FRotationMatrix(FRotator(0.f, Yaw, 0.f)).GetUnitAxis(EAxis::X);
+	const FVector Right   = FRotationMatrix(FRotator(0.f, Yaw, 0.f)).GetUnitAxis(EAxis::Y);
+
+	// Sensitivity — tune this
+	const float Height = PlayerCameraManager->GetCameraLocation().Z;
+	const float PanSpeed = Height * 0.00035f; // try 0.0005–0.002 depending on zoom
+
+	// Dragging up moves camera forward (world “up”)
+	const FVector MoveDelta =
+		(-ScreenDelta.X * Right + ScreenDelta.Y * Forward) * PanSpeed;
+
+	OwnedPlayerCharacter->AddActorWorldOffset(MoveDelta, false);
+}
+
+void APHPlayerController::HandleMoveActionComplete(const FInputActionValue& InputActionValue)
+{
+	
+	PrevScreenTouchPos = FVector2D::ZeroVector;
+	PrevWorldTouchPos = FVector::ZeroVector;
+
+	UE_LOG(LogTemp, Warning, TEXT("Touch Move Action Complete"));
+}
+
+FVector APHPlayerController::GetWorldPosFromScreenPos(FVector2D ScreenPos)
+{
+	FVector WorldLocation = FVector::ZeroVector;
+	FVector WorldDirection = FVector::ZeroVector;
+	DeprojectScreenPositionToWorld(ScreenPos.X, ScreenPos.Y, WorldLocation, WorldDirection);
+
+	return WorldLocation;
+}
 
 
