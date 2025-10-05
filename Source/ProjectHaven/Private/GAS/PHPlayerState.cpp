@@ -1,8 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "PHPlayerState.h"
-
+#include "GAS/PHPlayerState.h"
 #include "GAS/PHAbilitySystemComponent.h"
 #include "GAS/PHAttributeSet.h"
 
